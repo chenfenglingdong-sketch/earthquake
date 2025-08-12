@@ -1,0 +1,2 @@
+glb/*.glb filter=lfs diff=lfs merge=lfs -text
+new_eq_app_files/plate_boundaries.json filter=lfs diff=lfs merge=lfs -text

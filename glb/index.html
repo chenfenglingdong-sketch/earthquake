@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GLB Viewer by lee</title>
+    <style>
+        body { margin: 0; overflow: hidden; }
+        canvas { display: block; }
+    </style>
+</head>
+<body>
+
+<script src="https://unpkg.com/three@0.128.0/build/three.min.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/libs/stats.min.js"></script>
+
+<script>
+    let scene, camera, renderer, controls, stats, mixer;
+
+    init();
+    animate();
+
+    function init() {
+        const container = document.createElement('div');
+        document.body.appendChild(container);
+
+        // Scene
+        scene = new THREE.Scene();
+        scene.background = new THREE.Color(0xeeeeee);
+
+        // Camera
+        camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 1, 2000);
+        camera.position.set(100, 200, 200);
+
+        // Lighting
+        const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444);
+        hemiLight.position.set(0, 200, 0);
+        scene.add(hemiLight);
+
+        const dirLight = new THREE.DirectionalLight(0xffffff);
+        dirLight.position.set(0, 200, 100);
+        dirLight.castShadow = true;
+        dirLight.shadow.camera.top = 180;
+        dirLight.shadow.camera.bottom = 50;
+        dirLight.shadow.camera.left = -120;
+        dirLight.shadow.camera.right = 120;
+        scene.add(dirLight);
+
+        // Renderer
+        renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        container.appendChild(renderer.domElement);
+
+        // Controls
+        controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.target.set(0, 100, 0);
+        controls.update();
+
+        // Stats
+        stats = new Stats();
+        container.appendChild(stats.dom);
+
+        // GLTF Loader
+        const loader = new THREE.GLTFLoader();
+        loader.load('earthquakes.glb', function (gltf) {
+            const model = gltf.scene;
+            scene.add(model);
+
+            // Animation
+            if (gltf.animations && gltf.animations.length) {
+                mixer = new THREE.AnimationMixer(model);
+                gltf.animations.forEach((clip) => {
+                    mixer.clipAction(clip).play();
+                });
+            }
+        }, undefined, function (error) {
+            console.error('An error occurred:', error);
+        });
+
+        window.addEventListener('resize', onWindowResize, false);
+    }
+
+    function onWindowResize() {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+
+    function animate() {
+        requestAnimationFrame(animate);
+
+        if (mixer) mixer.update(0.01);
+        controls.update();
+        stats.update();
+
+        renderer.render(scene, camera);
+    }
+</script>
+
+</body>
+</html>

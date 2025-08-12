@@ -22,7 +22,8 @@ define(['./Draw'],
 
             this.FromDate = minDateISO.join('-');
             this.ToDate = maxDateISO.join('-');
-            this.Limit = 200000000;
+            this.Limit = 200;
+            this.Offset = 0;
 
             this.MinLongitude = -360;
             this.MaxLongitude = 360;
@@ -38,7 +39,8 @@ define(['./Draw'],
                 toDate: maxDateISO.join('-'),
                 minDepth: 0,
                 maxDepth: 1000,
-                limit: 200000000,
+                limit: 200,
+                offset: 0,
                 MinLongitude: -360,
                 MaxLongitude: 360,
                 MinLatitude: -90,
@@ -87,6 +89,10 @@ define(['./Draw'],
                 this.Limit = value;
             };
 
+            this.setOffset = function (value) {
+                this.Offset = value;
+            };
+
             this.setMinDepth = function (value) {
                 this.minDepth = value;
             };
@@ -132,6 +138,7 @@ define(['./Draw'],
                 FromDate = this.parameters.FromDate,
                 ToDate = this.parameters.ToDate,
                 limit = this.parameters.Limit,
+                offset = this.parameters.Offset,
                 origin = this.parameters.Origin,
                 radialLati = this.parameters.radialLatitude,
                 radialLong = this.parameters.radialLongitude,
@@ -152,6 +159,7 @@ define(['./Draw'],
                 "&mindepth=" + minDepth.toString() +
                 "&maxdepth=" + maxDepth.toString()+
                 "&limit=" + limit.toString() +
+                "&offset=" + offset.toString() +
                 "&orderby=" + control.coloringMode;
 
             if (drawingType == 'circle') {
@@ -178,27 +186,42 @@ define(['./Draw'],
         var earthquakes = this;
         var firstTime = true;
 
+        this.loadNextPage = async function(drawingType, draw) {
+            earthquakes.parameters.setOffset(0);
+            var all = {type: "FeatureCollection", features: []};
+            await earthquakes.fetchNext(drawingType, draw, all);
+            control.mostRecentSigEQ(all);
+            draw.graph(all);
+            control.CurGeoJSON(all);
+        };
+
+        this.fetchNext = async function(drawingType, draw, accumulator) {
+            var url = earthquakes.getUrl(drawingType);
+            try {
+                var EQ = await $.getJSON(url);
+            } catch (e) {
+                return;
+            }
+            if (EQ && EQ.features && EQ.features.length > 0) {
+                accumulator.features = accumulator.features.concat(EQ.features);
+                draw.placeMarkCreation(accumulator, earthquakes);
+                earthquakes.parameters.setOffset(earthquakes.parameters.Offset + EQ.features.length);
+                await earthquakes.fetchNext(drawingType, draw, accumulator);
+            }
+        };
+
         this.redraw = function(draw) {
             var drawOption = control.drawMode;
 
             if (firstTime) {
-                $.get(this.getUrl(), function (EQ) {
-                    draw.placeMarkCreation(EQ, earthquakes);
+                earthquakes.loadNextPage(undefined, draw).then(function(){
                     control.initializeHandlers();
-                    control.mostRecentSigEQ(EQ);
-                    draw.graph(EQ);
-                    // earthquakes.geoJSON = EQ;
-                    control.CurGeoJSON(EQ);
                 });
                 firstTime = false;
             }
             else {
-                this.parameters.update(draw.queryFig, drawOption);
-                $.get(this.getUrl(drawOption), function (EQ) {
-                    draw.placeMarkCreation(EQ, earthquakes);
-                    draw.graph(EQ);
-                    control.CurGeoJSON(EQ);
-                });
+                earthquakes.parameters.update(draw.queryFig, drawOption);
+                earthquakes.loadNextPage(drawOption, draw);
             }
         };
 

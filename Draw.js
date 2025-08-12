@@ -53,30 +53,46 @@ define(['./Circle',
             var earthquakeLayer = new WorldWind.RenderableLayer("Earthquakes");
             wwd.addLayer(earthquakeLayer);
 
-            this.placeMarkCreation = function (GeoJSON, earthquakes) {
+            this.placeMarkCreation = function (GeoJSON, earthquakes, batchSize) {
                 // Polygon Generation
                 data = GeoJSON;
                 myearthquake = earthquakes;
                 earthquakeLayer.removeAllRenderables();
 
-                function PopulateEarthquakeLayer(GeoJSON) {
-                    for (var i = 0; i < GeoJSON.features.length; i++) {
-                        var eq = GeoJSON.features[i];
+                function PopulateEarthquakeLayerAsync(GeoJSON, batchSize) {
+                    var index = 0;
+                    var total = GeoJSON.features.length;
+                    var size = batchSize || 300;
+                    earthquakeLayer.showSpinner = true;
+                    var progressEl = document.getElementById('loadingProgress');
 
-                        var placeMark = new EQPlacemark(eq.geometry.coordinates, control.coloringMode, eq.properties.mag, eq.properties.time, myearthquake.parameters);
-                        earthquakeLayer.addRenderable(placeMark.placemark);
-
-                        // var polygon = new EQPolygon(GeoJSON.features[i].geometry['coordinates']);
-                        // polygonLayer.addRenderable(polygon.polygon);
-
-                        // var polygon = new Cylinder(GeoJSON.features[i].geometry['coordinates'], GeoJSON.features[i].properties['mag'] * 5e5);
-                        // earthquakeLayer.addRenderable(polygon.cylinder);
-
+                    function processBatch() {
+                        var end = Math.min(index + size, total);
+                        for (; index < end; index++) {
+                            var eq = GeoJSON.features[index];
+                            var placeMark = new EQPlacemark(eq.geometry.coordinates, control.coloringMode, eq.properties.mag, eq.properties.time, myearthquake.parameters);
+                            earthquakeLayer.addRenderable(placeMark.placemark);
+                        }
+                        wwd.redraw();
+                        if (progressEl) {
+                            progressEl.textContent = Math.round((index / total) * 100) + "%";
+                        }
+                        if (index < total) {
+                            setTimeout(processBatch, 0);
+                        } else {
+                            if (progressEl) {
+                                progressEl.textContent = "";
+                            }
+                            updateMetadata();
+                            earthquakeLayer.showSpinner = false;
+                        }
                     }
+
+                    processBatch();
                     return earthquakeLayer;
                 }
 
-                PopulateEarthquakeLayer(GeoJSON);
+                PopulateEarthquakeLayerAsync(GeoJSON, batchSize);
 
                 function updateMetadata() {
                     Metadata.seteq_count(GeoJSON.features.length);
@@ -128,8 +144,6 @@ define(['./Circle',
                     }
                 }
 
-                updateMetadata();
-                earthquakeLayer.showSpinner = false;
                 return earthquakeLayer;
             };
 

@@ -2,7 +2,7 @@ define(['./worldwind.min'],
     function(WorldWind) {
         "use strict";
 
-        var placemarks = []; // 存储所有地震点的数组
+        const placemarkInfos = []; // 使用弱引用存储地震点及其时间
         var animations = []; // 存储所有动画的数组
 
         function EQPlacemark(coordinates, coloring, magnitude, time, query) {
@@ -21,7 +21,11 @@ define(['./worldwind.min'],
             placemark.attributes = placemarkAttributes;
 
             this.placemark = placemark;
-            placemarks.push(this); // 将地震点添加到数组中
+            // 仅存储动画所需的信息：时间和对地震点实例的弱引用
+            placemarkInfos.push({
+                ref: new WeakRef(this),
+                time: this.time,
+            });
         }
 
         function renderCircle(depth) {
@@ -49,40 +53,61 @@ define(['./worldwind.min'],
             animations.forEach(animation => animation.kill());
             animations = [];
 
-            placemarks.sort((a, b) => a.time - b.time);
+            // 收集仍在内存中的地震点
+            const active = placemarkInfos
+                .map((info, index) => {
+                    const obj = info.ref.deref();
+                    return obj ? { index, time: info.time, obj } : null;
+                })
+                .filter(Boolean);
 
-            placemarks.forEach((placemark, index) => {
-                let colorProxy = { g: 0 };
+            const infoMap = new Map(active.map(item => [item.index, item.obj]));
+            const sorter = new Worker('placemarkSortWorker.js');
+            let sortedCount = 0;
 
-                var animation = gsap.to(colorProxy, {
-                    g: 255,
-                    duration: 1,
-                    delay: index * (20 / placemarks.length),
-                    onUpdate: function () {
-                        placemark.placemark.attributes.imageSource =
-                            new WorldWind.ImageSource(renderCircle(placemark.placemark.position.altitude / -1000));
-                        if (typeof worldWindow !== 'undefined' && worldWindow.redraw) {
-                            worldWindow.redraw();
-                        }
-                    },
-                    repeat: 3,
-                    yoyo: true,
+            sorter.onmessage = function (e) {
+                const { batch, done } = e.data;
+                batch.forEach((entry, batchIndex) => {
+                    const placemark = infoMap.get(entry.index);
+                    if (!placemark) return;
+                    const colorProxy = { g: 0 };
+                    const animation = gsap.to(colorProxy, {
+                        g: 255,
+                        duration: 1,
+                        delay: (sortedCount + batchIndex) * (20 / active.length),
+                        onUpdate: function () {
+                            placemark.placemark.attributes.imageSource =
+                                new WorldWind.ImageSource(renderCircle(placemark.placemark.position.altitude / -1000));
+                            if (typeof worldWindow !== 'undefined' && worldWindow.redraw) {
+                                worldWindow.redraw();
+                            }
+                        },
+                        repeat: 3,
+                        yoyo: true,
+                    });
+                    animations.push(animation);
                 });
+                sortedCount += batch.length;
+                if (done) {
+                    sorter.terminate();
+                }
+            };
 
-                animations.push(animation);
-            });
+            sorter.postMessage(active.map(({ index, time }) => ({ index, time })));
         }
 
         function stopAnimationsAndReset() {
-            animations.forEach(animation => {
-                animation.kill();
-                animation.targets().forEach(target => {
-                    target.g = 0;
+            animations.forEach(animation => animation.kill());
+            animations = [];
+
+            // 重置所有仍存在的地震点
+            placemarkInfos.forEach(info => {
+                const placemark = info.ref.deref();
+                if (placemark) {
                     placemark.placemark.attributes.imageSource =
                         new WorldWind.ImageSource(renderCircle(placemark.placemark.position.altitude / -1000));
-                });
+                }
             });
-            animations = [];
 
             if (typeof worldWindow !== 'undefined' && worldWindow.redraw) {
                 worldWindow.redraw();

@@ -26,61 +26,54 @@ $minLatitude = isset($_GET['minlatitude']) ? $_GET['minlatitude'] : -90;
 $maxLatitude = isset($_GET['maxlatitude']) ? $_GET['maxlatitude'] : 90;
 $minLongitude = isset($_GET['minlongitude']) ? $_GET['minlongitude'] : -180;
 $maxLongitude = isset($_GET['maxlongitude']) ? $_GET['maxlongitude'] : 180;
+$limit = isset($_GET['limit']) ? intval($_GET['limit']) : 100;
+$offset = isset($_GET['offset']) ? intval($_GET['offset']) : 0;
 
 $startYear = date('Y', strtotime($startDate));
 $endYear = date('Y', strtotime($endDate));
 
-$features = [];
+$queries = [];
 for ($year = $startYear; $year <= $endYear; $year++) {
     $tableName = "earthquakes_" . $year;
-    // 构建查询SQL语句，包括过滤条件
-    $sql = "SELECT * FROM $tableName 
-            WHERE time >= '$startDate' AND time <= '$endDate' 
-            AND mag BETWEEN $minMagnitude AND $maxMagnitude 
-            AND depth BETWEEN $minDepth AND $maxDepth 
-            AND latitude BETWEEN $minLatitude AND $maxLatitude 
+    $queries[] = "SELECT * FROM $tableName
+            WHERE time >= '$startDate' AND time <= '$endDate'
+            AND mag BETWEEN $minMagnitude AND $maxMagnitude
+            AND depth BETWEEN $minDepth AND $maxDepth
+            AND latitude BETWEEN $minLatitude AND $maxLatitude
             AND longitude BETWEEN $minLongitude AND $maxLongitude";
-    
-    $result = $conn->query($sql);
+}
 
-    if ($result && $result->num_rows > 0) {
-        while ($row = $result->fetch_assoc()) {
-            $features[] = [
-                'time' => strtotime($row['time']) * 1000, // 转换时间为毫秒
-                'feature' => [
-                    'type' => 'Feature',
-                    'properties' => [
-                        'mag' => floatval($row['mag']),
-                        'place' => $row['place'],
-                        'time' => strtotime($row['time']) * 1000, // 转换时间为毫秒
-                    ],
-                    'geometry' => [
-                        'type' => 'Point',
-                        'coordinates' => [
-                            floatval($row['longitude']),
-                            floatval($row['latitude']),
-                            floatval($row['depth'])
-                        ],
-                    ],
-                ]
-            ];
-        }
+$sql = implode(' UNION ALL ', $queries) . ' ORDER BY time LIMIT ? OFFSET ?';
+$stmt = $conn->prepare($sql);
+$stmt->bind_param('ii', $limit, $offset);
+$stmt->execute();
+$result = $stmt->get_result();
+
+$features = [];
+if ($result && $result->num_rows > 0) {
+    while ($row = $result->fetch_assoc()) {
+        $features[] = [
+            'type' => 'Feature',
+            'properties' => [
+                'mag' => floatval($row['mag']),
+                'place' => $row['place'],
+                'time' => strtotime($row['time']) * 1000,
+            ],
+            'geometry' => [
+                'type' => 'Point',
+                'coordinates' => [
+                    floatval($row['longitude']),
+                    floatval($row['latitude']),
+                    floatval($row['depth'])
+                ],
+            ],
+        ];
     }
 }
 
-// 根据时间戳对地震数据进行全局排序
-usort($features, function($a, $b) {
-    return $a['time'] - $b['time'];
-});
-
-// 从排序后的数据中提取GeoJSON特性
-$sortedFeatures = array_map(function($feature) {
-    return $feature['feature'];
-}, $features);
-
 $geojson = [
     'type' => 'FeatureCollection',
-    'features' => $sortedFeatures,
+    'features' => $features,
 ];
 
 echo json_encode($geojson);
